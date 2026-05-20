@@ -1,4 +1,5 @@
 name: Render SignalFlux Video
+
 on:
   workflow_dispatch:
     inputs:
@@ -7,7 +8,7 @@ on:
         required: true
         default: 'AI tools are taking over content creation in 2026'
       score:
-        description: 'Upvote score (number)'
+        description: 'Upvote score (numeric, e.g. 124000)'
         required: true
         default: '124000'
       niche:
@@ -30,6 +31,18 @@ on:
         description: 'Accent color hex (no #)'
         required: false
         default: 'ADFF2F'
+      fact1:
+        description: 'Optional supporting fact #1'
+        required: false
+        default: ''
+      fact2:
+        description: 'Optional supporting fact #2'
+        required: false
+        default: ''
+      imageUrl:
+        description: 'Optional image URL to include in the video'
+        required: false
+        default: ''
 
 jobs:
   render:
@@ -47,11 +60,35 @@ jobs:
       - name: Print runtime / tool versions (debug)
         run: |
           echo "::group::Environment"
-          echo "Node:    $(node -v)"
-          echo "npm:     $(npm -v)"
-          echo "OS:      $(uname -a)"
-          echo "PWD:     $(pwd)"
+          echo "Node:      $(node -v)"
+          echo "npm:       $(npm -v)"
+          echo "OS:        $(uname -a)"
+          echo "PWD:       $(pwd)"
           echo "WORKSPACE: $GITHUB_WORKSPACE"
+          echo "::endgroup::"
+
+      - name: Print received workflow inputs (debug)
+        env:
+          INPUT_TITLE:  ${{ github.event.inputs.title }}
+          INPUT_SCORE:  ${{ github.event.inputs.score }}
+          INPUT_NICHE:  ${{ github.event.inputs.niche }}
+          INPUT_HOOK:   ${{ github.event.inputs.hook }}
+          INPUT_FORMAT: ${{ github.event.inputs.format }}
+          INPUT_ACCENT: ${{ github.event.inputs.accent_color }}
+          INPUT_FACT1:  ${{ github.event.inputs.fact1 }}
+          INPUT_FACT2:  ${{ github.event.inputs.fact2 }}
+          INPUT_IMAGE:  ${{ github.event.inputs.imageUrl }}
+        run: |
+          echo "::group::Inputs"
+          echo "title:        $INPUT_TITLE"
+          echo "score (raw):  $INPUT_SCORE"
+          echo "niche:        $INPUT_NICHE"
+          echo "hook:         $INPUT_HOOK"
+          echo "format:       $INPUT_FORMAT"
+          echo "accent_color: $INPUT_ACCENT"
+          echo "fact1:        $INPUT_FACT1"
+          echo "fact2:        $INPUT_FACT2"
+          echo "imageUrl:     $INPUT_IMAGE"
           echo "::endgroup::"
 
       - name: Install dependencies
@@ -74,34 +111,49 @@ jobs:
           else
             echo "id=TrendShort" >> "$GITHUB_OUTPUT"
           fi
-          echo "Selected composition id: will appear in step output"
 
       - name: Create output directory
         run: mkdir -p "$GITHUB_WORKSPACE/out"
 
       - name: Create Remotion props file
         env:
-          INPUT_TITLE: ${{ github.event.inputs.title }}
-          INPUT_SCORE: ${{ github.event.inputs.score }}
-          INPUT_NICHE: ${{ github.event.inputs.niche }}
-          INPUT_HOOK:  ${{ github.event.inputs.hook }}
+          INPUT_TITLE:  ${{ github.event.inputs.title }}
+          INPUT_SCORE:  ${{ github.event.inputs.score }}
+          INPUT_NICHE:  ${{ github.event.inputs.niche }}
+          INPUT_HOOK:   ${{ github.event.inputs.hook }}
           INPUT_ACCENT: ${{ github.event.inputs.accent_color }}
+          INPUT_FACT1:  ${{ github.event.inputs.fact1 }}
+          INPUT_FACT2:  ${{ github.event.inputs.fact2 }}
+          INPUT_IMAGE:  ${{ github.event.inputs.imageUrl }}
         run: |
-          # Build props.json safely with Node so all string escaping is correct,
-          # and numeric `score` is coerced to a number.
+          # Build props.json safely with Node so all string escaping is correct.
+          # `score` is sanitized: strip non-digits, then coerce to Number.
+          # This means "50K", "124,000", "$124000" all become valid numbers.
           node -e '
             const fs = require("fs");
-            const props = {
-              title: process.env.INPUT_TITLE,
-              score: Number(process.env.INPUT_SCORE),
-              niche: process.env.INPUT_NICHE,
-              hook:  process.env.INPUT_HOOK,
-              accentColor: "#" + process.env.INPUT_ACCENT,
-            };
-            if (Number.isNaN(props.score)) {
-              console.error("ERROR: score is not a valid number:", process.env.INPUT_SCORE);
+
+            const rawScore = String(process.env.INPUT_SCORE || "").trim();
+            const digits = rawScore.replace(/[^\d]/g, "");
+            const score = digits.length > 0 ? Number(digits) : NaN;
+
+            if (Number.isNaN(score)) {
+              console.error("ERROR: score could not be parsed to a number. Raw value:", rawScore);
               process.exit(1);
             }
+
+            const accentRaw = String(process.env.INPUT_ACCENT || "ADFF2F").replace(/^#/, "");
+
+            const props = {
+              title:       process.env.INPUT_TITLE,
+              score,
+              niche:       process.env.INPUT_NICHE,
+              hook:        process.env.INPUT_HOOK,
+              accentColor: "#" + accentRaw,
+              fact1:       process.env.INPUT_FACT1 || "",
+              fact2:       process.env.INPUT_FACT2 || "",
+              imageUrl:    process.env.INPUT_IMAGE || "",
+            };
+
             fs.writeFileSync("out/props.json", JSON.stringify(props, null, 2));
             console.log("Wrote out/props.json:");
             console.log(JSON.stringify(props, null, 2));
@@ -132,9 +184,9 @@ jobs:
           echo "Using props file:  $PROPS_PATH"
           echo "Output path:       $OUT_PATH"
 
-          # Use an ABSOLUTE path for --props (the failing run used a relative path
-          # which Remotion could not resolve/parse).
-          # Also pass the value as a separate argument (avoids any '=' quoting quirks).
+          # Use an ABSOLUTE path for --props (a prior failing run used a relative
+          # path which Remotion could not resolve/parse). Pass the value as a
+          # separate argument to avoid any '=' quoting quirks.
           npx remotion render \
             src/index.tsx \
             "${{ steps.comp.outputs.id }}" \
