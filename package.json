@@ -1,0 +1,21 @@
+{
+  "name": "signalflux-remotion",
+  "version": "1.0.0",
+  "scripts": {
+    "build": "npx remotion bundle src/index.tsx --out bundle",
+    "render-short": "npx remotion render src/index.tsx TrendShort out/short.mp4",
+    "render-horizontal": "npx remotion render src/index.tsx TrendHorizontal out/horizontal.mp4"
+  },
+  "dependencies": {
+    "react": "18.2.0",
+    "react-dom": "18.2.0",
+    "remotion": "4.0.290",
+    "@remotion/cli": "4.0.290",
+    "@remotion/renderer": "4.0.290",
+    "typescript": "5.4.5"
+  },
+  "devDependencies": {
+    "@types/react": "18.2.0",
+    "@types/react-dom": "18.2.0"
+  }
+}
