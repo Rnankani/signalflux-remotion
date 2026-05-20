@@ -30,6 +30,7 @@ on:
         description: 'Accent color hex (no #)'
         required: false
         default: 'ADFF2F'
+
 jobs:
   render:
     runs-on: ubuntu-latest
@@ -43,8 +44,24 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Print runtime / tool versions (debug)
+        run: |
+          echo "::group::Environment"
+          echo "Node:    $(node -v)"
+          echo "npm:     $(npm -v)"
+          echo "OS:      $(uname -a)"
+          echo "PWD:     $(pwd)"
+          echo "WORKSPACE: $GITHUB_WORKSPACE"
+          echo "::endgroup::"
+
       - name: Install dependencies
         run: npm install
+
+      - name: Print Remotion version (debug)
+        run: |
+          echo "Remotion CLI version:"
+          npx remotion versions || true
+          npx remotion --version || true
 
       - name: Install Chromium for Remotion
         run: npx remotion browser ensure
@@ -53,42 +70,110 @@ jobs:
         id: comp
         run: |
           if [ "${{ github.event.inputs.format }}" = "horizontal" ]; then
-            echo "id=TrendHorizontal" >> $GITHUB_OUTPUT
+            echo "id=TrendHorizontal" >> "$GITHUB_OUTPUT"
           else
-            echo "id=TrendShort" >> $GITHUB_OUTPUT
+            echo "id=TrendShort" >> "$GITHUB_OUTPUT"
           fi
+          echo "Selected composition id: will appear in step output"
 
       - name: Create output directory
-        run: mkdir -p out
+        run: mkdir -p "$GITHUB_WORKSPACE/out"
 
       - name: Create Remotion props file
+        env:
+          INPUT_TITLE: ${{ github.event.inputs.title }}
+          INPUT_SCORE: ${{ github.event.inputs.score }}
+          INPUT_NICHE: ${{ github.event.inputs.niche }}
+          INPUT_HOOK:  ${{ github.event.inputs.hook }}
+          INPUT_ACCENT: ${{ github.event.inputs.accent_color }}
         run: |
-          cat << 'EOF' > out/props.json
-          {
-            "title": ${{ toJson(github.event.inputs.title) }},
-            "score": ${{ github.event.inputs.score }},
-            "niche": ${{ toJson(github.event.inputs.niche) }},
-            "hook": ${{ toJson(github.event.inputs.hook) }},
-            "accentColor": "#${{ github.event.inputs.accent_color }}"
-          }
-          EOF
+          # Build props.json safely with Node so all string escaping is correct,
+          # and numeric `score` is coerced to a number.
+          node -e '
+            const fs = require("fs");
+            const props = {
+              title: process.env.INPUT_TITLE,
+              score: Number(process.env.INPUT_SCORE),
+              niche: process.env.INPUT_NICHE,
+              hook:  process.env.INPUT_HOOK,
+              accentColor: "#" + process.env.INPUT_ACCENT,
+            };
+            if (Number.isNaN(props.score)) {
+              console.error("ERROR: score is not a valid number:", process.env.INPUT_SCORE);
+              process.exit(1);
+            }
+            fs.writeFileSync("out/props.json", JSON.stringify(props, null, 2));
+            console.log("Wrote out/props.json:");
+            console.log(JSON.stringify(props, null, 2));
+          '
+
+      - name: Debug — verify props.json
+        run: |
+          echo "::group::Workspace listing"
+          ls -la "$GITHUB_WORKSPACE"
+          ls -la "$GITHUB_WORKSPACE/out"
+          echo "::endgroup::"
+
+          echo "::group::props.json contents"
+          cat "$GITHUB_WORKSPACE/out/props.json"
+          echo "::endgroup::"
+
+          echo "::group::Validate props.json with node JSON.parse"
+          node -e "JSON.parse(require('fs').readFileSync('$GITHUB_WORKSPACE/out/props.json','utf8')); console.log('props.json is valid JSON ✅')"
+          echo "::endgroup::"
 
       - name: Render video
         run: |
+          set -euxo pipefail
+          PROPS_PATH="$GITHUB_WORKSPACE/out/props.json"
+          OUT_PATH="$GITHUB_WORKSPACE/out/video.mp4"
+
+          echo "Using composition: ${{ steps.comp.outputs.id }}"
+          echo "Using props file:  $PROPS_PATH"
+          echo "Output path:       $OUT_PATH"
+
+          # Use an ABSOLUTE path for --props (the failing run used a relative path
+          # which Remotion could not resolve/parse).
+          # Also pass the value as a separate argument (avoids any '=' quoting quirks).
           npx remotion render \
             src/index.tsx \
-            ${{ steps.comp.outputs.id }} \
-            out/video.mp4 \
-            --props="./out/props.json"
+            "${{ steps.comp.outputs.id }}" \
+            "$OUT_PATH" \
+            --props "$PROPS_PATH" \
+            --log=verbose
+
+      - name: Debug — verify output video
+        if: always()
+        run: |
+          echo "::group::Output directory after render"
+          ls -la "$GITHUB_WORKSPACE/out" || true
+          echo "::endgroup::"
+          if [ -f "$GITHUB_WORKSPACE/out/video.mp4" ]; then
+            echo "video.mp4 size: $(stat -c%s "$GITHUB_WORKSPACE/out/video.mp4") bytes"
+          else
+            echo "❌ video.mp4 was NOT created"
+          fi
 
       - name: Upload rendered video
+        if: success()
         uses: actions/upload-artifact@v4
         with:
           name: signalflux-video-${{ github.run_id }}
           path: out/video.mp4
           retention-days: 7
 
+      - name: Upload debug props (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: signalflux-debug-${{ github.run_id }}
+          path: |
+            out/props.json
+          retention-days: 7
+          if-no-files-found: warn
+
       - name: Print download instructions
+        if: success()
         run: |
           echo "✅ Video rendered successfully!"
-          echo "Download: Go to Actions tab → This run → Artifacts → signalflux-video-${{ github.run_id }}"
+          echo "Download: Actions tab → this run → Artifacts → signalflux-video-${{ github.run_id }}"
