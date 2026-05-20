@@ -61,7 +61,34 @@ jobs:
       - name: Create output directory
         run: mkdir -p out
 
+      - name: Create Remotion props file
+        run: |
+          cat << 'EOF' > out/props.json
+          {
+            "title": ${{ toJson(github.event.inputs.title) }},
+            "score": ${{ github.event.inputs.score }},
+            "niche": ${{ toJson(github.event.inputs.niche) }},
+            "hook": ${{ toJson(github.event.inputs.hook) }},
+            "accentColor": "#${{ github.event.inputs.accent_color }}"
+          }
+          EOF
+
       - name: Render video
-        env:
-          INPUT_TITLE: ${{ github.event.inputs.title }}
-          INPUT_SCORE: ${{ github.event.inputs.score
+        run: |
+          npx remotion render \
+            src/index.tsx \
+            ${{ steps.comp.outputs.id }} \
+            out/video.mp4 \
+            --props=out/props.json
+
+      - name: Upload rendered video
+        uses: actions/upload-artifact@v4
+        with:
+          name: signalflux-video-${{ github.run_id }}
+          path: out/video.mp4
+          retention-days: 7
+
+      - name: Print download instructions
+        run: |
+          echo "✅ Video rendered successfully!"
+          echo "Download: Go to Actions tab → This run → Artifacts → signalflux-video-${{ github.run_id }}"
