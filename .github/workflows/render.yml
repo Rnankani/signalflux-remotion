@@ -79,7 +79,7 @@ jobs:
             src/index.tsx \
             ${{ steps.comp.outputs.id }} \
             out/video.mp4 \
-            --props=out/props.json
+             --props="$(cat out/props.json)"
 
       - name: Upload rendered video
         uses: actions/upload-artifact@v4
