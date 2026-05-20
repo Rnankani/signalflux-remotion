@@ -1,5 +1,4 @@
 name: Render SignalFlux Video
-
 on:
   workflow_dispatch:
     inputs:
@@ -31,12 +30,10 @@ on:
         description: 'Accent color hex (no #)'
         required: false
         default: 'ADFF2F'
-
 jobs:
   render:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -45,7 +42,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install dependencies
         run: npm install
@@ -66,21 +62,6 @@ jobs:
         run: mkdir -p out
 
       - name: Render video
-        run: |
-          npx remotion render \
-            src/index.tsx \
-            ${{ steps.comp.outputs.id }} \
-            out/video.mp4 \
-            --props='{"title":"${{ github.event.inputs.title }}","score":${{ github.event.inputs.score }},"niche":"${{ github.event.inputs.niche }}","hook":"${{ github.event.inputs.hook }}","accentColor":"#${{ github.event.inputs.accent_color }}"}'
-
-      - name: Upload rendered video
-        uses: actions/upload-artifact@v4
-        with:
-          name: signalflux-video-${{ github.run_id }}
-          path: out/video.mp4
-          retention-days: 7
-
-      - name: Print download instructions
-        run: |
-          echo "✅ Video rendered successfully!"
-          echo "Download: Go to Actions tab → This run → Artifacts → signalflux-video-${{ github.run_id }}"
+        env:
+          INPUT_TITLE: ${{ github.event.inputs.title }}
+          INPUT_SCORE: ${{ github.event.inputs.score
